@@ -1,27 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { channel } from "@/lib/storage";
 
 /**
- * Re-render when local storage changes (this tab via `moiss:change`, or another
- * tab via the native `storage` event).
+ * Re-render when local storage changes — same document (`moiss:change`), other
+ * windows (`BroadcastChannel`), or other tabs (`storage`).
  *
- * The first render always returns `initial` — the same value the server renders —
- * so hydration never mismatches. Real storage is read in an effect right after
- * mount.
+ * First render always returns `initial` (matches the server) so hydration never
+ * mismatches; real storage is read in an effect right after mount.
  */
 export function useStore<T>(selector: () => T, initial: T): [T, () => void] {
   const [value, setValue] = useState<T>(initial);
-
   const refresh = useCallback(() => setValue(selector()), [selector]);
 
   useEffect(() => {
     refresh();
-    window.addEventListener("moiss:change", refresh);
-    window.addEventListener("storage", refresh);
+    const onChange = () => refresh();
+    window.addEventListener("moiss:change", onChange);
+    window.addEventListener("storage", onChange);
+    channel?.addEventListener("message", onChange);
     return () => {
-      window.removeEventListener("moiss:change", refresh);
-      window.removeEventListener("storage", refresh);
+      window.removeEventListener("moiss:change", onChange);
+      window.removeEventListener("storage", onChange);
+      channel?.removeEventListener("message", onChange);
     };
   }, [refresh]);
 

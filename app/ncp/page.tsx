@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import type {
   CrisisUpdate,
@@ -16,6 +16,7 @@ import { UpdateCard } from "@/components/UpdateCard";
 import { QRDisplay } from "@/components/QRDisplay";
 import { QRScanner } from "@/components/QRScanner";
 import { VerificationBadge } from "@/components/VerificationBadge";
+import { BootstrapPanel } from "@/components/BootstrapPanel";
 import { useStore } from "@/components/useStore";
 import {
   addNcpReport,
@@ -25,7 +26,7 @@ import {
   getNcpUpdates,
   setNcpPublished,
 } from "@/lib/storage";
-import { buildPayload, decodePayload, encodePayload } from "@/lib/transfer";
+import { buildTransfer, readTransfer } from "@/lib/transfer";
 import { PRIORITY_LABEL, formatTime, reportId } from "@/lib/util";
 
 const NCP_LOCATION = "Strijp-S";
@@ -56,20 +57,20 @@ export default function NcpPage() {
   const [reportQr, setReportQr] = useState<string | null>(null);
 
   function receive(raw: string) {
-    const res = decodePayload(raw);
-    if (!res.ok || !res.payload || res.payload.kind !== "crisis_update") {
+    const res = readTransfer(raw);
+    if (!res.ok || res.kind !== "crisis_update" || !res.data) {
       setNotice(res.error || "Not a municipal update.");
       return;
     }
+    const data = res.data as CrisisUpdate;
     const stored: StoredUpdate = {
-      payload: res.payload,
+      data,
       receivedAt: new Date().toISOString(),
       deliveryStatus: "delivered",
       verified: !!res.verified,
     };
-    // Only keep updates whose municipal signature checks out. An unverified
-    // update is shown in the confirmation panel with a warning but never stored
-    // or made publishable.
+    // NCP independently verifies every message (defence-in-depth). Unverified
+    // updates are shown with a warning but never stored or made publishable.
     if (stored.verified) addNcpUpdate(stored);
     setLastImport(stored);
     setScanning(false);
@@ -89,12 +90,12 @@ export default function NcpPage() {
       sourceNcp: `NCP ${NCP_LOCATION}`,
     };
     addNcpReport(report);
-    setReportQr(encodePayload(buildPayload("field_report", report)));
+    setReportQr(buildTransfer("field_report", report));
     setRLocation("");
     setRDesc("");
   }
 
-  const importedUpdate = lastImport?.payload.data as CrisisUpdate | undefined;
+  const imported = lastImport?.data;
   const canPublish = !!lastImport?.verified;
 
   return (
@@ -102,20 +103,20 @@ export default function NcpPage() {
       <RoleHeader role="Neighborhood Information Point" sub={NCP_LOCATION} />
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-5 py-8">
-        <section className="grid grid-cols-3 gap-3">
+        <section className="grid grid-cols-2 gap-3">
           <Stat label="Location" value={NCP_LOCATION} />
-          <Stat label="System" value="Offline" accent />
           <Stat
             label="On display"
             value={published ? published.id : "None"}
+            accent={!!published}
           />
         </section>
 
-        {notice ? (
+        {notice && (
           <p className="mt-4 rounded bg-ehv-red px-3 py-2 text-sm font-medium text-white">
             {notice}
           </p>
-        ) : null}
+        )}
 
         {!scanning ? (
           <button
@@ -143,39 +144,35 @@ export default function NcpPage() {
         )}
 
         {/* CONFIRMATION */}
-        {lastImport && importedUpdate ? (
+        {lastImport && imported && (
           <section
             className={`mt-6 rounded-lg border-2 p-5 ${
               canPublish ? "border-ehv-green" : "border-ehv-red"
             } bg-white`}
           >
             <p className="text-xs font-bold uppercase tracking-widest text-ehv-ink/45">
-              Update received
+              Receiving
             </p>
-            <div className="mt-2 grid grid-cols-2 gap-y-1 text-sm">
+            <p className="mt-1 font-mono text-2xl font-bold text-ehv-ink">
+              {imported.id}
+            </p>
+            <div className="mt-2 grid grid-cols-[6rem_1fr] gap-y-1 text-sm">
               <span className="text-ehv-ink/55">Source</span>
               <span className="font-semibold">Municipal Command</span>
-              <span className="text-ehv-ink/55">Update ID</span>
-              <span className="font-semibold font-mono">
-                {importedUpdate.id}
-              </span>
               <span className="text-ehv-ink/55">Timestamp</span>
               <span className="font-semibold">
-                {formatTime(importedUpdate.createdAt)}
+                {formatTime(imported.createdAt)}
               </span>
             </div>
             <div className="mt-3">
-              <VerificationBadge
-                verified={lastImport.verified}
-                mode={lastImport.payload.mode}
-              />
+              <VerificationBadge verified={lastImport.verified} />
             </div>
 
             <div className="mt-4">
-              <UpdateCard update={importedUpdate} compact />
+              <UpdateCard update={imported} compact />
             </div>
 
-            {canPublish && published?.id === importedUpdate.id ? (
+            {canPublish && published?.id === imported.id ? (
               <div className="mt-4 rounded bg-ehv-green/10 p-3 text-center">
                 <p className="text-sm font-bold text-ehv-green">
                   Published to public display
@@ -192,7 +189,7 @@ export default function NcpPage() {
             ) : canPublish ? (
               <button
                 onClick={() => {
-                  setNcpPublished(importedUpdate);
+                  setNcpPublished(imported);
                   try {
                     window.open("/ncp/display", "_blank", "noopener");
                   } catch {
@@ -209,9 +206,9 @@ export default function NcpPage() {
               </p>
             )}
           </section>
-        ) : null}
+        )}
 
-        {/* PUBLIC DISPLAY LINK */}
+        {/* PUBLIC DISPLAY */}
         <section className="mt-8 flex flex-wrap items-center gap-3 rounded-lg border border-ehv-grey-line bg-white p-4">
           <div>
             <p className="font-bold text-ehv-ink">Public display</p>
@@ -228,155 +225,155 @@ export default function NcpPage() {
           >
             Open display →
           </Link>
-          {published ? (
+          {published && (
             <button
               onClick={() => setNcpPublished(null)}
               className="rounded border border-ehv-grey-line px-3 py-1.5 text-sm font-semibold text-ehv-ink/60"
             >
               Clear
             </button>
-          ) : null}
+          )}
         </section>
 
-        {/* FIELD REPORT */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-ehv-ink">
-            Field report (send back with courier)
-          </h2>
-          <form
-            onSubmit={submitReport}
-            className="mt-3 space-y-4 rounded-lg border border-ehv-grey-line bg-white p-5"
-          >
-            <div className="grid gap-4 sm:grid-cols-2">
+        {/* LOCAL TRANSFER NETWORK */}
+        <BootstrapPanel networkName="MOISS-EHV-NCP" />
+
+        {/* FIELD REPORT — secondary */}
+        <details className="mt-8 rounded-lg border border-ehv-grey-line bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-bold text-ehv-ink">
+            Send field report back to Command
+          </summary>
+          <div className="border-t border-ehv-grey-line p-4">
+            <form onSubmit={submitReport} className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-sm font-semibold text-ehv-ink/70">
+                    Type
+                  </span>
+                  <select
+                    value={rType}
+                    onChange={(e) => setRType(e.target.value as FieldReportType)}
+                    className="ncp-input"
+                  >
+                    {REPORT_TYPES.map((t) => (
+                      <option key={t} value={t} className="capitalize">
+                        {t.replace("-", " ")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-sm font-semibold text-ehv-ink/70">
+                    Priority
+                  </span>
+                  <select
+                    value={rPriority}
+                    onChange={(e) => setRPriority(e.target.value as Priority)}
+                    className="ncp-input"
+                  >
+                    {PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {PRIORITY_LABEL[p]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <label className="block">
                 <span className="mb-1 block text-sm font-semibold text-ehv-ink/70">
-                  Type
+                  Location
                 </span>
-                <select
-                  value={rType}
-                  onChange={(e) =>
-                    setRType(e.target.value as FieldReportType)
-                  }
+                <input
+                  value={rLocation}
+                  onChange={(e) => setRLocation(e.target.value)}
+                  placeholder="Boschdijk 123"
                   className="ncp-input"
-                >
-                  {REPORT_TYPES.map((t) => (
-                    <option key={t} value={t} className="capitalize">
-                      {t.replace("-", " ")}
-                    </option>
-                  ))}
-                </select>
+                  required
+                />
               </label>
               <label className="block">
                 <span className="mb-1 block text-sm font-semibold text-ehv-ink/70">
-                  Priority
+                  Description
                 </span>
-                <select
-                  value={rPriority}
-                  onChange={(e) => setRPriority(e.target.value as Priority)}
-                  className="ncp-input"
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {PRIORITY_LABEL[p]}
-                    </option>
-                  ))}
-                </select>
+                <textarea
+                  value={rDesc}
+                  onChange={(e) => setRDesc(e.target.value)}
+                  rows={2}
+                  placeholder="Medical assistance required."
+                  className="ncp-input resize-none"
+                  required
+                />
               </label>
-            </div>
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-ehv-ink/70">
-                Location
-              </span>
-              <input
-                value={rLocation}
-                onChange={(e) => setRLocation(e.target.value)}
-                placeholder="Boschdijk 123"
-                className="ncp-input"
-                required
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block text-sm font-semibold text-ehv-ink/70">
-                Description
-              </span>
-              <textarea
-                value={rDesc}
-                onChange={(e) => setRDesc(e.target.value)}
-                rows={2}
-                placeholder="Medical assistance required."
-                className="ncp-input resize-none"
-                required
-              />
-            </label>
-            <button
-              type="submit"
-              className="w-full rounded bg-ehv-ink px-4 py-3 font-bold text-white"
-            >
-              Create field report
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="w-full rounded bg-ehv-ink px-4 py-3 font-bold text-white"
+              >
+                Create field report
+              </button>
+            </form>
 
-          {reportQr ? (
-            <div className="mt-4 rounded-lg border-2 border-ehv-ink bg-white p-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold">Courier pickup</h3>
-                <button
-                  onClick={() => setReportQr(null)}
-                  className="text-sm font-semibold text-ehv-ink/50"
-                >
-                  Close
-                </button>
+            {reportQr && (
+              <div className="mt-4 rounded-lg border-2 border-ehv-ink bg-white p-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold">Courier pickup</h3>
+                  <button
+                    onClick={() => setReportQr(null)}
+                    className="text-sm font-semibold text-ehv-ink/50"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="mt-3 flex justify-center">
+                  <QRDisplay
+                    value={reportQr}
+                    caption="Courier → import on return trip"
+                  />
+                </div>
               </div>
-              <div className="mt-3 flex justify-center">
-                <QRDisplay value={reportQr} caption="Courier → import on return trip" />
-              </div>
-            </div>
-          ) : null}
+            )}
 
-          {reports.length ? (
-            <ul className="mt-4 space-y-2 text-sm">
-              {reports.map((r) => (
-                <li
-                  key={r.id}
-                  className="rounded border border-ehv-grey-line bg-white p-3"
-                >
-                  <span className="font-mono text-xs text-ehv-ink/50">
-                    {r.id}
-                  </span>{" "}
-                  <span className="font-semibold capitalize">
-                    {r.type.replace("-", " ")}
-                  </span>{" "}
-                  — {r.location} ({PRIORITY_LABEL[r.priority]})
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
+            {reports.length > 0 && (
+              <ul className="mt-4 space-y-2 text-sm">
+                {reports.map((r) => (
+                  <li
+                    key={r.id}
+                    className="rounded border border-ehv-grey-line bg-white p-3"
+                  >
+                    <span className="font-mono text-xs text-ehv-ink/50">
+                      {r.id}
+                    </span>{" "}
+                    <span className="font-semibold capitalize">
+                      {r.type.replace("-", " ")}
+                    </span>{" "}
+                    — {r.location} ({PRIORITY_LABEL[r.priority]})
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
 
         {/* RECEIVED HISTORY */}
-        {updates.length ? (
-          <section className="mt-10">
+        {updates.length > 0 && (
+          <section className="mt-8">
             <h2 className="text-xl font-bold text-ehv-ink">Received updates</h2>
             <div className="mt-3 space-y-3">
-              {updates.map((s) => {
-                const u = s.payload.data as CrisisUpdate;
-                return (
-                  <div key={u.id} className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <UpdateCard update={u} receivedAt={s.receivedAt} compact />
-                    </div>
-                    <button
-                      onClick={() => setNcpPublished(u)}
-                      className="shrink-0 rounded border border-ehv-red px-3 py-1.5 text-sm font-semibold text-ehv-red"
-                    >
-                      Display
-                    </button>
+              {updates.map((s) => (
+                <div key={s.data.id} className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <UpdateCard update={s.data} receivedAt={s.receivedAt} compact />
                   </div>
-                );
-              })}
+                  <button
+                    onClick={() => setNcpPublished(s.data)}
+                    className="shrink-0 rounded border border-ehv-red px-3 py-1.5 text-sm font-semibold text-ehv-red"
+                  >
+                    Display
+                  </button>
+                </div>
+              ))}
             </div>
           </section>
-        ) : null}
+        )}
 
         <DemoControls />
       </main>

@@ -1,112 +1,86 @@
-# MOISS — Municipal Offline Information Sync System
+<p align="center">
+  <img src="public/branding/logo-eindhoven.png" alt="Gemeente Eindhoven" height="56">
+</p>
 
-A civic-resilience prototype for a **72-hour prolonged power outage** in Eindhoven.
+<h1 align="center">MOISS</h1>
 
-When internet and cellular networks are down, MOISS moves verified municipal
-crisis updates between disconnected locations. A **courier on foot or bicycle
-becomes the transport layer**:
+<p align="center"><strong>No internet. No cellular. Verified information still moves.</strong></p>
 
-```
-Municipal Command  →  Courier smartphone  →  Neighborhood Information Point (NCP)  →  Public display
-     (Laptop A)          (physically moves)            (Laptop B)                     (fullscreen)
-```
+MOISS keeps verified municipal crisis information moving during a prolonged
+blackout. A courier physically carries signed updates between disconnected
+locations — Command → Courier → NCP → citizens.
 
-Every hop transfers a QR code (or a pasted transfer code). No server, no
-internet, no cellular — after the first page load the whole workflow is offline.
-
-> Hackathon prototype — **not** an official Gemeente Eindhoven system.
-
-## Tech
-
-Next.js (App Router) · TypeScript · Tailwind · `localStorage` · Ed25519 signing
-(`@noble/ed25519`) · `qrcode` + `jsQR` · minimal service worker for offline.
-
-## Run
+## Quick start
 
 ```bash
+git clone <repo> && cd HackatonFontysFall2026
 npm install
 npm run build
-npm start          # http://localhost:3000  (add PORT=3100 if 3000 is taken)
+npm start          # http://localhost:3100
 ```
 
-`npm run dev` also works. The service worker (offline cache) is only active in
-the `build` + `start` production run.
-
-## Routes
-
-| Route          | Device      | Purpose                                    |
-|----------------|-------------|--------------------------------------------|
-| `/`            | any         | Role picker                                |
-| `/command`     | Laptop A    | Create & sign crisis updates               |
-| `/courier`     | Smartphone  | Receive, carry, hand off updates           |
-| `/ncp`         | Laptop B    | Receive, verify, publish; file field reports|
-| `/ncp/display` | Monitor     | Fullscreen public crisis board             |
-| `/about`       | any         | System status & transport-chain overview   |
+| Route          | Device      |
+|----------------|-------------|
+| `/command`     | Laptop A — create updates |
+| `/courier`     | Smartphone — carry updates |
+| `/ncp`         | Laptop B — verify & publish |
+| `/ncp/display` | Monitor — citizen-facing board |
 
 ## 60-second demo
 
-Setup: on Laptop B open **two** tabs — `/ncp` (operator) and `/ncp/display`
-(the public screen / projector). The display updates itself the moment the
-operator publishes.
+1. **Command** → `Load demo update (EHV-004)` → `Generate transfer QR`.
+2. **Courier** → `Receive update` → scan the QR (or `Paste`). Shows **EHV-004 ✓ Verified**.
+3. **Courier** → walk to Laptop B → `Show transfer QR`.
+4. **NCP** → `Receive municipal update` → scan it → **Verified municipal update**.
+5. **NCP** → `Publish to public display`.
+6. `/ncp/display` updates instantly — with Wi-Fi off the whole time.
 
-1. **Command** (Laptop A, `/command`) — click **Load demo update (EHV-004)**,
-   then **Generate transfer QR**.
-2. **Courier** (phone, `/courier`) — **Receive update** → scan the QR (or open
-   **Paste** and paste the transfer code). Card shows **Verified municipal
-   update / Ready for delivery**. Walk the phone to Laptop B.
-3. **Courier** — **Show transfer QR**. **NCP** (Laptop B, `/ncp`) — **Receive
-   municipal update** → scan it. Confirmation panel shows **Verified municipal
-   update**.
-4. **NCP** — **Publish to public display**. The `/ncp/display` tab switches to
-   the drinking-water notice in full-screen type, hands-free.
-5. Point out: turn off Wi-Fi and repeat — nothing changes. The transport never
-   needed a network.
-
-**Reset:** the **Reset demo** button (bottom of any operator screen, tap twice).
-**Tamper check (optional):** edit one character of a pasted transfer code before
-receiving at the NCP → red *Signature invalid — do not publish*, publishing
-blocked.
-
-## How verification works
-
-Municipal Command signs each update with an Ed25519 private key. Every NCP
-embeds the matching public key (`lib/keys.ts`). On receipt the NCP re-computes
-the signature over a canonical JSON of the payload:
-
-- **valid** → green *Verified municipal update*, publishing allowed
-- **invalid / tampered** → red *Signature invalid — do not publish*, publish
-  button removed, update not stored
-
-The demo keypair is the RFC 8032 test vector, shipped in the repo on purpose —
-in a real deployment the private key never leaves Command hardware.
-
-## Transfer format
-
-`MOISS1:` + base64(JSON) where JSON is
-`{ v, kind: "crisis_update" | "field_report", data, sig, pub, mode }`.
-Small enough for one QR (~600 chars). Three import routes everywhere:
-**camera**, **image upload**, **paste** — the demo can't fail on a camera
-permission.
-
-## Optional: two-way field reporting
-
-`/ncp` can file a **Field report** (medical, water, fire, …) → generates a
-courier-pickup QR → `/command` imports it under **Field reports (return trip)**.
-Same offline mechanism, opposite direction — delay-tolerant upstream reporting.
-
-## Branding note
-
-The municipal mark in the header is a **clearly-labelled placeholder**
-(`components/Brand.tsx`). Drop the official asset at
-`public/gemeente-eindhoven-logo.svg` and render it there once its use is cleared.
-No fake or altered municipality logo is included.
-
-## Project layout
+## How it works
 
 ```
-app/            command · courier · ncp · ncp/display · about
-components/      RoleHeader · UpdateCard · QRDisplay · QRScanner ·
-                VerificationBadge · PublicDisplay · DemoControls · Brand
-lib/            storage · transfer · verification · keys · demo · util
-types/          CrisisUpdate · FieldReport · TransferPayload · StoredUpdate
+Command ──signed update──▶ Courier ──physical transport──▶ NCP ──▶ Citizens
 ```
+
+- **Local hotspot** — bootstrap + fast sync (a laptop hosts MOISS on a local network)
+- **Data QR** — universal fallback, needs no network at all
+- **Transfer code** — last-resort paste fallback
+
+## Courier bootstrap
+
+A courier arriving with their own phone and no app:
+
+1. Join the local MOISS Wi-Fi (scan the Wi-Fi QR on Command / NCP).
+2. Scan the second QR to open the locally hosted Courier screen.
+3. Receive the update — it is now stored on the phone.
+
+Set `NEXT_PUBLIC_MOISS_LOCAL_HOST` / `_WIFI_SSID` / `_WIFI_PASSWORD` (see
+`.env.example`); unset, the panel shows setup steps instead of faking a network.
+
+## Verification
+
+Updates are signed with Ed25519. Every NCP is provisioned with the municipality
+public key before a crisis, so the key never travels in the transfer. A tampered
+message fails verification and cannot be stored, carried, or published.
+
+## Two-way reporting
+
+An NCP can send a signed field report back to Command on the courier's return
+trip, using the same transfer mechanism. It is a collapsed secondary panel.
+
+## Offline behavior
+
+After the first load a service worker serves every route from cache, so all
+screens work with no connection. The connectivity chip shows **Online**,
+**Local only**, or **Offline** — MOISS transport is operational in all three.
+
+## Project structure
+
+```
+app/         command · courier · ncp · ncp/display · about · api/transfer
+components/  RoleHeader · QRDisplay · QRScanner · PublicDisplay · BootstrapPanel …
+lib/         transfer (codec) · verification · connectivity · storage · localsync · config
+```
+
+## Disclaimer
+
+Hackathon prototype — not an official Gemeente Eindhoven system.

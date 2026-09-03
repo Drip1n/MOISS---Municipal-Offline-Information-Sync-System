@@ -1,12 +1,19 @@
 // Minimal offline support for MOISS.
 //
 // Strategy: NETWORK-FIRST. Always try the network; fall back to cache only when
-// offline. This guarantees a fresh build is never shadowed by stale cached
-// chunks, while still letting the whole app (all routes) load with no
-// connection once it has been visited once.
+// offline. A fresh build is never shadowed by stale cached chunks, and the whole
+// app (all routes) still loads with no connection once visited.
 
-const CACHE = "moiss-v2";
-const CORE = ["/", "/command", "/courier", "/ncp", "/ncp/display", "/about"];
+const CACHE = "moiss-v3";
+const CORE = [
+  "/",
+  "/command",
+  "/courier",
+  "/ncp",
+  "/ncp/display",
+  "/about",
+  "/branding/logo-eindhoven.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -31,9 +38,11 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  if (request.method !== "GET" || new URL(request.url).origin !== self.location.origin) {
-    return;
-  }
+  const url = new URL(request.url);
+  if (request.method !== "GET" || url.origin !== self.location.origin) return;
+  // The local-sync relay must always hit the network directly.
+  if (url.pathname.startsWith("/api/")) return;
+
   event.respondWith(
     fetch(request)
       .then((res) => {

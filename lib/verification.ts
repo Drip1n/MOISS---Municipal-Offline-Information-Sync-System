@@ -1,28 +1,24 @@
 import * as ed from "@noble/ed25519";
 import { sha512 } from "@noble/hashes/sha512";
-import type { CrisisUpdate, FieldReport, TransferPayload } from "@/types";
+import type { CrisisUpdate, FieldReport } from "@/types";
 import { COMMAND_PRIVATE_KEY_HEX, COMMAND_PUBLIC_KEY_HEX } from "./keys";
 
-// Wire a pure-JS SHA-512 so signing/verifying works fully offline and
-// synchronously, with no dependency on Web Crypto / subtle availability.
+// Pure-JS SHA-512 so signing / verifying works fully offline and synchronously,
+// with no dependency on Web Crypto being available.
 ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m));
 
 export const COMMAND_PUBLIC_KEY = COMMAND_PUBLIC_KEY_HEX;
 
 /**
- * Deterministic, stable serialisation of the signed object. Keys are sorted so
- * the byte string is identical on every device regardless of field order.
+ * Deterministic serialisation of the signed object — keys sorted so the byte
+ * string is identical on every device regardless of field order or transport
+ * shape (V1 verbose and V2 compact sign the same bytes).
  */
 export function canonicalJSON(data: CrisisUpdate | FieldReport): string {
   const src = data as unknown as Record<string, unknown>;
-  const keys = Object.keys(src).sort();
   const obj: Record<string, unknown> = {};
-  for (const k of keys) obj[k] = src[k];
+  for (const k of Object.keys(src).sort()) obj[k] = src[k];
   return JSON.stringify(obj);
-}
-
-function toBytes(s: string): Uint8Array {
-  return new TextEncoder().encode(s);
 }
 
 function b64encode(bytes: Uint8Array): string {
@@ -38,22 +34,20 @@ function b64decode(s: string): Uint8Array {
   return out;
 }
 
-/** Sign a crisis update / field report as Municipal Command. */
-export function signData(data: CrisisUpdate | FieldReport): {
-  sig: string;
-  pub: string;
-} {
-  const msg = toBytes(canonicalJSON(data));
-  const sig = ed.sign(msg, COMMAND_PRIVATE_KEY_HEX);
-  return { sig: b64encode(sig), pub: COMMAND_PUBLIC_KEY_HEX };
+/** Sign a crisis update / field report as Municipal Command. Returns base64 sig. */
+export function signData(data: CrisisUpdate | FieldReport): string {
+  const msg = new TextEncoder().encode(canonicalJSON(data));
+  return b64encode(ed.sign(msg, COMMAND_PRIVATE_KEY_HEX));
 }
 
-/** Verify a received payload against the embedded Municipal Command public key. */
-export function verifyPayload(payload: TransferPayload): boolean {
+/** Verify a signature against the pre-provisioned municipality public key. */
+export function verifySignature(
+  data: CrisisUpdate | FieldReport,
+  sigB64: string
+): boolean {
   try {
-    if (payload.mode === "prototype") return true;
-    const msg = toBytes(canonicalJSON(payload.data));
-    return ed.verify(b64decode(payload.sig), msg, COMMAND_PUBLIC_KEY_HEX);
+    const msg = new TextEncoder().encode(canonicalJSON(data));
+    return ed.verify(b64decode(sigB64), msg, COMMAND_PUBLIC_KEY_HEX);
   } catch {
     return false;
   }

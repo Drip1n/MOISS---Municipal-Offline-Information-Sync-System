@@ -1,24 +1,19 @@
 import Link from "next/link";
 import { Brand } from "./Brand";
+import { ConnectivityStatus } from "./ConnectivityStatus";
 
 /**
  * Every operator screen opens with the same three answers:
- * WHERE AM I (role) · WHAT IS THE STATUS (offline) · plus the system name.
+ * WHERE AM I (role) · WHAT IS THE STATUS (connectivity) · what is this (MOISS).
  */
-export function RoleHeader({
-  role,
-  sub,
-}: {
-  role: string;
-  sub?: string;
-}) {
+export function RoleHeader({ role, sub }: { role: string; sub?: string }) {
   return (
     <header className="border-b border-ehv-grey-line bg-white">
-      <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-3">
-        <Link href="/" className="hover:opacity-80">
+      <div className="mx-auto flex max-w-3xl items-start justify-between gap-4 px-5 py-3">
+        <Link href="/" className="hover:opacity-80" aria-label="MOISS home">
           <Brand />
         </Link>
-        <OfflinePill />
+        <ConnectivityStatus />
       </div>
       <div className="mx-auto max-w-3xl px-5 pb-5 pt-1">
         <div className="flex items-baseline gap-3">
@@ -37,17 +32,5 @@ export function RoleHeader({
         ) : null}
       </div>
     </header>
-  );
-}
-
-export function OfflinePill() {
-  return (
-    <span
-      className="inline-flex items-center gap-2 rounded-full border border-ehv-grey-line bg-ehv-grey px-3 py-1 text-xs font-semibold uppercase tracking-wide text-ehv-ink/70"
-      title="No internet required for message transport."
-    >
-      <span className="h-2 w-2 rounded-full bg-ehv-ink/50" />
-      Offline mode
-    </span>
   );
 }

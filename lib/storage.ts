@@ -2,7 +2,10 @@ import type { CrisisUpdate, FieldReport, StoredUpdate } from "@/types";
 
 /**
  * All persistence is local to the browser (localStorage). No network, no server.
- * Each role keeps its own slice of state under a namespaced key.
+ * Changes are broadcast three ways so any open window updates instantly:
+ *   - custom `moiss:change` event  (same document)
+ *   - BroadcastChannel "moiss"     (other tabs / windows, same origin)
+ *   - native `storage` event       (fallback for other tabs)
  */
 
 const KEYS = {
@@ -14,6 +17,11 @@ const KEYS = {
   ncpPublished: "moiss.ncp.published",
   ncpReports: "moiss.ncp.reports",
 } as const;
+
+export const channel: BroadcastChannel | null =
+  typeof window !== "undefined" && "BroadcastChannel" in window
+    ? new BroadcastChannel("moiss")
+    : null;
 
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -29,6 +37,7 @@ function write<T>(key: string, value: T): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(key, JSON.stringify(value));
   window.dispatchEvent(new Event("moiss:change"));
+  channel?.postMessage({ t: "change", key });
 }
 
 /* ---------------- Command ---------------- */
@@ -37,8 +46,7 @@ export const getCommandUpdates = () =>
   read<CrisisUpdate[]>(KEYS.commandUpdates, []);
 
 export function saveCommandUpdate(update: CrisisUpdate) {
-  const list = getCommandUpdates();
-  write(KEYS.commandUpdates, [update, ...list]);
+  write(KEYS.commandUpdates, [update, ...getCommandUpdates()]);
 }
 
 export const getCommandReports = () =>
@@ -57,18 +65,17 @@ export const getCourierUpdates = () =>
 
 export function addCourierUpdate(stored: StoredUpdate) {
   const list = getCourierUpdates();
-  const data = stored.payload.data as CrisisUpdate;
-  if (list.some((s) => (s.payload.data as CrisisUpdate).id === data.id)) return;
+  if (list.some((s) => s.data.id === stored.data.id)) return;
   write(KEYS.courierUpdates, [stored, ...list]);
 }
 
 export function markCourierUpdateDelivered(id: string) {
-  const list = getCourierUpdates().map((s) =>
-    (s.payload.data as CrisisUpdate).id === id
-      ? { ...s, deliveryStatus: "delivered" as const }
-      : s
+  write(
+    KEYS.courierUpdates,
+    getCourierUpdates().map((s) =>
+      s.data.id === id ? { ...s, deliveryStatus: "delivered" as const } : s
+    )
   );
-  write(KEYS.courierUpdates, list);
 }
 
 export const getCourierReports = () =>
@@ -86,8 +93,7 @@ export const getNcpUpdates = () => read<StoredUpdate[]>(KEYS.ncpUpdates, []);
 
 export function addNcpUpdate(stored: StoredUpdate) {
   const list = getNcpUpdates();
-  const data = stored.payload.data as CrisisUpdate;
-  if (list.some((s) => (s.payload.data as CrisisUpdate).id === data.id)) return;
+  if (list.some((s) => s.data.id === stored.data.id)) return;
   write(KEYS.ncpUpdates, [stored, ...list]);
 }
 
@@ -101,8 +107,7 @@ export function setNcpPublished(update: CrisisUpdate | null) {
 export const getNcpReports = () => read<FieldReport[]>(KEYS.ncpReports, []);
 
 export function addNcpReport(report: FieldReport) {
-  const list = getNcpReports();
-  write(KEYS.ncpReports, [report, ...list]);
+  write(KEYS.ncpReports, [report, ...getNcpReports()]);
 }
 
 /* ---------------- Demo control ---------------- */
@@ -111,4 +116,5 @@ export function resetAll() {
   if (typeof window === "undefined") return;
   Object.values(KEYS).forEach((k) => window.localStorage.removeItem(k));
   window.dispatchEvent(new Event("moiss:change"));
+  channel?.postMessage({ t: "change", key: "reset" });
 }

@@ -1,4 +1,4 @@
-import type { Category, Priority } from "@/types";
+import type { Priority } from "@/types";
 
 export function nextUpdateId(existing: { id: string }[]): string {
   const nums = existing
@@ -23,7 +23,13 @@ export function formatTime(iso: string): string {
   }
 }
 
-export const CATEGORY_LABEL: Record<Category, string> = {
+/** Accepts "" (unset) or a valid 24-hour HH:MM. Rejects "banana", "25:99". */
+export function isValidTime(v: string): boolean {
+  if (v === "") return true;
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+}
+
+const KNOWN_CATEGORY: Record<string, string> = {
   general: "General",
   water: "Water",
   medical: "Medical",
@@ -31,6 +37,11 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   safety: "Safety",
   infrastructure: "Infrastructure",
 };
+
+/** Known category key → label; custom values are shown as typed. */
+export function categoryLabel(c: string): string {
+  return KNOWN_CATEGORY[c] ?? c;
+}
 
 export const PRIORITY_LABEL: Record<Priority, string> = {
   normal: "Normal",

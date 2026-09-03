@@ -1,29 +1,37 @@
-export type Area =
-  | "City-wide"
-  | "Strijp-S"
-  | "Centrum"
-  | "Woensel"
-  | "Tongelre";
-
-export type Category =
-  | "general"
-  | "water"
-  | "medical"
-  | "shelter"
-  | "safety"
-  | "infrastructure";
-
 export type Priority = "normal" | "high" | "critical";
 
+/** Preset areas offered in the Command form. "Other" opens a free-text field. */
+export const AREA_PRESETS = [
+  "City-wide",
+  "Strijp-S",
+  "Centrum",
+  "Woensel",
+  "Tongelre",
+] as const;
+
+/** Known category keys. "Other" opens a free-text field. */
+export const CATEGORY_PRESETS = [
+  "general",
+  "water",
+  "medical",
+  "shelter",
+  "safety",
+  "infrastructure",
+] as const;
+
+/**
+ * Internal / domain object — kept readable. `area` and `category` are free
+ * strings so custom values transport as-is; presets are just common choices.
+ */
 export interface CrisisUpdate {
   id: string;
   createdAt: string; // ISO timestamp
-  area: Area;
-  category: Category;
+  area: string;
+  category: string;
   priority: Priority;
   message: string;
-  validUntil: string; // free text, e.g. "18:00"
-  nextUpdate: string; // free text, e.g. "18:00"
+  validUntil: string; // "HH:MM" or ""
+  nextUpdate: string; // "HH:MM" or ""
 }
 
 export type FieldReportType =
@@ -36,31 +44,20 @@ export type FieldReportType =
 
 export interface FieldReport {
   id: string;
-  createdAt: string; // ISO timestamp
+  createdAt: string;
   type: FieldReportType;
   priority: Priority;
   location: string;
   description: string;
-  sourceNcp: string; // e.g. "NCP Strijp-S"
+  sourceNcp: string;
 }
 
 export type TransferKind = "crisis_update" | "field_report";
 
-export interface TransferPayload {
-  v: 1;
-  kind: TransferKind;
-  data: CrisisUpdate | FieldReport;
-  sig: string; // base64 Ed25519 signature over canonical JSON of `data`
-  pub: string; // hex public key of signer (for display)
-  mode: "signed" | "prototype";
-}
-
-/** How a stored update moves through the courier pipeline. */
-export type DeliveryStatus = "pending" | "delivered";
-
+/** A crisis update stored on a device after a verified transfer. */
 export interface StoredUpdate {
-  payload: TransferPayload;
+  data: CrisisUpdate;
   receivedAt: string;
-  deliveryStatus: DeliveryStatus;
+  deliveryStatus: "pending" | "delivered";
   verified: boolean;
 }

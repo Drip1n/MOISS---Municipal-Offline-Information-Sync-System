@@ -1,29 +1,22 @@
-import type { TransferPayload } from "@/types";
-
 export function VerificationBadge({
   verified,
-  mode,
   label,
 }: {
   verified: boolean;
-  mode?: TransferPayload["mode"];
   label?: string;
 }) {
   if (verified) {
     return (
       <span className="inline-flex items-center gap-2 rounded bg-ehv-green/10 px-3 py-1.5 text-sm font-semibold text-ehv-green">
         <CheckIcon />
-        {label ??
-          (mode === "prototype"
-            ? "Prototype verification"
-            : "Verified municipal update")}
+        {label ?? "Verified municipal update"}
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-2 rounded bg-ehv-red/10 px-3 py-1.5 text-sm font-semibold text-ehv-red">
       <WarnIcon />
-      Signature invalid — do not publish
+      Invalid municipal signature
     </span>
   );
 }
@@ -51,12 +44,7 @@ function WarnIcon() {
         strokeWidth="1.8"
         strokeLinejoin="round"
       />
-      <path
-        d="M8 6v3.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
+      <path d="M8 6v3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <circle cx="8" cy="11.6" r="0.9" fill="currentColor" />
     </svg>
   );

@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type {
-  Area,
-  Category,
-  CrisisUpdate,
-  FieldReport,
-  Priority,
+import { useEffect, useMemo, useState } from "react";
+import {
+  AREA_PRESETS,
+  CATEGORY_PRESETS,
+  type CrisisUpdate,
+  type FieldReport,
+  type Priority,
 } from "@/types";
 import { RoleHeader } from "@/components/RoleHeader";
 import { Footer } from "@/components/Footer";
@@ -15,6 +15,7 @@ import { UpdateCard } from "@/components/UpdateCard";
 import { QRDisplay } from "@/components/QRDisplay";
 import { QRScanner } from "@/components/QRScanner";
 import { VerificationBadge } from "@/components/VerificationBadge";
+import { BootstrapPanel } from "@/components/BootstrapPanel";
 import { useStore } from "@/components/useStore";
 import {
   addCommandReport,
@@ -22,39 +23,50 @@ import {
   getCommandUpdates,
   saveCommandUpdate,
 } from "@/lib/storage";
-import { buildPayload, decodePayload, encodePayload } from "@/lib/transfer";
-import { CATEGORY_LABEL, PRIORITY_LABEL, formatTime, nextUpdateId } from "@/lib/util";
+import { buildTransfer, readTransfer } from "@/lib/transfer";
+import { makeSyncCode, pushLocal } from "@/lib/localsync";
+import {
+  categoryLabel,
+  PRIORITY_LABEL,
+  formatTime,
+  isValidTime,
+  nextUpdateId,
+} from "@/lib/util";
 
-const AREAS: Area[] = ["City-wide", "Strijp-S", "Centrum", "Woensel", "Tongelre"];
-const CATEGORIES: Category[] = [
-  "general",
-  "water",
-  "medical",
-  "shelter",
-  "safety",
-  "infrastructure",
-];
 const PRIORITIES: Priority[] = ["normal", "high", "critical"];
+const OTHER = "__other__";
 
 export default function CommandPage() {
   const [updates] = useStore<CrisisUpdate[]>(getCommandUpdates, []);
   const [reports] = useStore<FieldReport[]>(getCommandReports, []);
   const [transferFor, setTransferFor] = useState<string | null>(null);
-  const [reportNotice, setReportNotice] = useState<string>("");
+  const [reportNotice, setReportNotice] = useState("");
   const [importingReport, setImportingReport] = useState(false);
 
-  const [area, setArea] = useState<Area>("Strijp-S");
-  const [category, setCategory] = useState<Category>("water");
+  const [areaSel, setAreaSel] = useState<string>("Strijp-S");
+  const [areaCustom, setAreaCustom] = useState("");
+  const [catSel, setCatSel] = useState<string>("water");
+  const [catCustom, setCatCustom] = useState("");
   const [priority, setPriority] = useState<Priority>("high");
   const [message, setMessage] = useState("");
   const [validUntil, setValidUntil] = useState("18:00");
   const [nextUpdate, setNextUpdate] = useState("18:00");
+  const [formError, setFormError] = useState("");
 
   const lastCreated = updates[0]?.createdAt;
 
   function publish(e: React.FormEvent) {
     e.preventDefault();
-    if (!message.trim()) return;
+    const area = areaSel === OTHER ? areaCustom.trim() : areaSel;
+    const category = catSel === OTHER ? catCustom.trim() : catSel;
+    if (!message.trim()) return setFormError("Message is required.");
+    if (areaSel === OTHER && !area) return setFormError("Enter a custom area.");
+    if (catSel === OTHER && !category)
+      return setFormError("Enter a custom category.");
+    if (!isValidTime(validUntil) || !isValidTime(nextUpdate))
+      return setFormError("Times must be HH:MM.");
+
+    setFormError("");
     const update: CrisisUpdate = {
       id: nextUpdateId(updates),
       createdAt: new Date().toISOString(),
@@ -62,8 +74,8 @@ export default function CommandPage() {
       category,
       priority,
       message: message.trim(),
-      validUntil: validUntil.trim(),
-      nextUpdate: nextUpdate.trim(),
+      validUntil,
+      nextUpdate,
     };
     saveCommandUpdate(update);
     setMessage("");
@@ -71,17 +83,10 @@ export default function CommandPage() {
   }
 
   const transferUpdate = updates.find((u) => u.id === transferFor) || null;
-  const transferCode = useMemo(
-    () =>
-      transferUpdate
-        ? encodePayload(buildPayload("crisis_update", transferUpdate))
-        : "",
-    [transferUpdate]
-  );
 
   function importReport(raw: string) {
-    const res = decodePayload(raw);
-    if (!res.ok || !res.payload || res.payload.kind !== "field_report") {
+    const res = readTransfer(raw);
+    if (!res.ok || res.kind !== "field_report" || !res.data) {
       setReportNotice(res.error || "That code is not a field report.");
       return;
     }
@@ -89,7 +94,7 @@ export default function CommandPage() {
       setReportNotice("Field report signature invalid — rejected.");
       return;
     }
-    addCommandReport(res.payload.data as FieldReport);
+    addCommandReport(res.data as FieldReport);
     setReportNotice("Field report received and verified.");
     setImportingReport(false);
   }
@@ -100,13 +105,12 @@ export default function CommandPage() {
 
       <main className="mx-auto w-full max-w-3xl flex-1 px-5 py-8">
         {/* STATUS */}
-        <section className="grid grid-cols-3 gap-3">
-          <Stat label="Network" value="Offline" accent />
+        <section className="grid grid-cols-2 gap-3">
+          <Stat label="Created updates" value={String(updates.length)} accent />
           <Stat
             label="Last update"
             value={lastCreated ? formatTime(lastCreated) : "—"}
           />
-          <Stat label="Pending transfers" value={String(updates.length)} />
         </section>
 
         {/* CREATE */}
@@ -119,27 +123,47 @@ export default function CommandPage() {
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Area">
                 <select
-                  value={area}
-                  onChange={(e) => setArea(e.target.value as Area)}
+                  value={areaSel}
+                  onChange={(e) => setAreaSel(e.target.value)}
                   className="input"
                 >
-                  {AREAS.map((a) => (
+                  {AREA_PRESETS.map((a) => (
                     <option key={a}>{a}</option>
                   ))}
+                  <option value={OTHER}>Other…</option>
                 </select>
+                {areaSel === OTHER && (
+                  <input
+                    value={areaCustom}
+                    onChange={(e) => setAreaCustom(e.target.value)}
+                    placeholder="Custom area"
+                    className="input mt-2"
+                    autoFocus
+                  />
+                )}
               </Field>
               <Field label="Category">
                 <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value as Category)}
+                  value={catSel}
+                  onChange={(e) => setCatSel(e.target.value)}
                   className="input"
                 >
-                  {CATEGORIES.map((c) => (
+                  {CATEGORY_PRESETS.map((c) => (
                     <option key={c} value={c}>
-                      {CATEGORY_LABEL[c]}
+                      {categoryLabel(c)}
                     </option>
                   ))}
+                  <option value={OTHER}>Other…</option>
                 </select>
+                {catSel === OTHER && (
+                  <input
+                    value={catCustom}
+                    onChange={(e) => setCatCustom(e.target.value)}
+                    placeholder="Custom category"
+                    className="input mt-2"
+                    autoFocus
+                  />
+                )}
               </Field>
               <Field label="Priority">
                 <select
@@ -170,21 +194,27 @@ export default function CommandPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Valid until">
                 <input
+                  type="time"
                   value={validUntil}
                   onChange={(e) => setValidUntil(e.target.value)}
                   className="input"
-                  placeholder="18:00"
                 />
               </Field>
               <Field label="Next expected update">
                 <input
+                  type="time"
                   value={nextUpdate}
                   onChange={(e) => setNextUpdate(e.target.value)}
                   className="input"
-                  placeholder="18:00"
                 />
               </Field>
             </div>
+
+            {formError && (
+              <p className="rounded bg-ehv-red/10 px-3 py-2 text-sm font-semibold text-ehv-red">
+                {formError}
+              </p>
+            )}
 
             <button
               type="submit"
@@ -196,30 +226,15 @@ export default function CommandPage() {
         </section>
 
         {/* TRANSFER */}
-        {transferUpdate ? (
-          <section className="mt-8 rounded-lg border-2 border-ehv-red bg-white p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-ehv-ink">
-                Transfer to courier
-              </h2>
-              <button
-                onClick={() => setTransferFor(null)}
-                className="text-sm font-semibold text-ehv-ink/50"
-              >
-                Close
-              </button>
-            </div>
-            <p className="mt-1 text-sm text-ehv-ink/60">
-              Update {transferUpdate.id} · show this to the courier device.
-            </p>
-            <div className="mt-4 flex justify-center">
-              <QRDisplay value={transferCode} caption="Courier → scan / import" />
-            </div>
-          </section>
-        ) : null}
+        {transferUpdate && (
+          <TransferPanel
+            update={transferUpdate}
+            onClose={() => setTransferFor(null)}
+          />
+        )}
 
         {/* CREATED UPDATES */}
-        {updates.length ? (
+        {updates.length > 0 && (
           <section className="mt-8">
             <h2 className="text-xl font-bold text-ehv-ink">Created updates</h2>
             <div className="mt-4 space-y-4">
@@ -236,80 +251,84 @@ export default function CommandPage() {
               ))}
             </div>
           </section>
-        ) : null}
+        )}
 
-        {/* INCOMING FIELD REPORTS */}
-        <section className="mt-10">
-          <h2 className="text-xl font-bold text-ehv-ink">Field reports (return trip)</h2>
-          {reportNotice ? (
-            <p className="mt-3 rounded bg-ehv-ink px-3 py-2 text-sm font-medium text-white">
-              {reportNotice}
-            </p>
-          ) : null}
-          {importingReport ? (
-            <div className="mt-3">
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="font-bold">Import from courier</h3>
-                <button
-                  type="button"
-                  onClick={() => setImportingReport(false)}
-                  className="text-sm font-semibold text-ehv-ink/50"
-                >
-                  Cancel
-                </button>
+        {/* LOCAL TRANSFER NETWORK */}
+        <BootstrapPanel networkName="MOISS-EHV-COMMAND" />
+
+        {/* INCOMING FIELD REPORTS — secondary */}
+        <details className="mt-8 rounded-lg border border-ehv-grey-line bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-bold text-ehv-ink">
+            Incoming field reports ({reports.length})
+          </summary>
+          <div className="border-t border-ehv-grey-line p-4">
+            {reportNotice && (
+              <p className="mb-3 rounded bg-ehv-ink px-3 py-2 text-sm font-medium text-white">
+                {reportNotice}
+              </p>
+            )}
+            {importingReport ? (
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="font-bold">Import from courier</h3>
+                  <button
+                    type="button"
+                    onClick={() => setImportingReport(false)}
+                    className="text-sm font-semibold text-ehv-ink/50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <QRScanner onResult={importReport} label="Import field report" />
               </div>
-              <QRScanner onResult={importReport} label="Import field report" />
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setReportNotice("");
-                setImportingReport(true);
-              }}
-              className="mt-3 rounded border border-ehv-red px-4 py-2.5 text-sm font-semibold text-ehv-red"
-            >
-              Import field report
-            </button>
-          )}
-          {reports.length ? (
-            <div className="mt-4 space-y-3">
-              {reports.map((r) => (
-                <article
-                  key={r.id}
-                  className="rounded-lg border border-ehv-grey-line bg-white p-4"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`rounded px-2 py-0.5 text-xs font-bold uppercase ${
-                        r.priority === "normal"
-                          ? "bg-ehv-grey text-ehv-ink/70"
-                          : "bg-ehv-red text-white"
-                      }`}
-                    >
-                      {PRIORITY_LABEL[r.priority]}
-                    </span>
-                    <span className="text-xs font-mono text-ehv-ink/50">
-                      {r.id}
-                    </span>
-                    <VerificationBadge verified label="Verified field report" />
-                  </div>
-                  <p className="mt-2 text-lg font-semibold capitalize">
-                    {r.type.replace("-", " ")}
-                  </p>
-                  <p className="text-ehv-ink">{r.description}</p>
-                  <p className="mt-1 text-sm text-ehv-ink/60">
-                    {r.location} · {r.sourceNcp} · {formatTime(r.createdAt)}
-                  </p>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-ehv-ink/50">
-              None received yet.
-            </p>
-          )}
-        </section>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setReportNotice("");
+                  setImportingReport(true);
+                }}
+                className="rounded border border-ehv-red px-4 py-2 text-sm font-semibold text-ehv-red"
+              >
+                Import field report
+              </button>
+            )}
+
+            {reports.length > 0 && (
+              <div className="mt-4 space-y-3">
+                {reports.map((r) => (
+                  <article
+                    key={r.id}
+                    className="rounded-lg border border-ehv-grey-line bg-white p-4"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded px-2 py-0.5 text-xs font-bold uppercase ${
+                          r.priority === "normal"
+                            ? "bg-ehv-grey text-ehv-ink/70"
+                            : "bg-ehv-red text-white"
+                        }`}
+                      >
+                        {PRIORITY_LABEL[r.priority]}
+                      </span>
+                      <span className="font-mono text-xs text-ehv-ink/50">
+                        {r.id}
+                      </span>
+                      <VerificationBadge verified label="Verified field report" />
+                    </div>
+                    <p className="mt-2 text-lg font-semibold capitalize">
+                      {r.type.replace("-", " ")}
+                    </p>
+                    <p className="text-ehv-ink">{r.description}</p>
+                    <p className="mt-1 text-sm text-ehv-ink/60">
+                      {r.location} · {r.sourceNcp} · {formatTime(r.createdAt)}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
 
         <DemoControls seed />
       </main>
@@ -317,6 +336,61 @@ export default function CommandPage() {
       <Footer />
       <FieldStyles />
     </div>
+  );
+}
+
+function TransferPanel({
+  update,
+  onClose,
+}: {
+  update: CrisisUpdate;
+  onClose: () => void;
+}) {
+  const code = useMemo(() => buildTransfer("crisis_update", update), [update]);
+  const [syncCode, setSyncCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    const c = makeSyncCode();
+    let alive = true;
+    pushLocal(c, code).then((ok) => {
+      if (alive) setSyncCode(ok ? c : null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [code]);
+
+  return (
+    <section className="mt-8 rounded-lg border-2 border-ehv-red bg-white p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-ehv-ink">Transfer to courier</h2>
+        <button
+          onClick={onClose}
+          className="text-sm font-semibold text-ehv-ink/50"
+        >
+          Close
+        </button>
+      </div>
+      <p className="mt-1 text-sm text-ehv-ink/60">
+        Update <span className="font-mono font-bold text-ehv-ink">{update.id}</span>{" "}
+        — show this to the courier device.
+      </p>
+
+      {syncCode && (
+        <p className="mt-3 rounded bg-ehv-grey px-3 py-2 text-sm">
+          <span className="font-semibold text-ehv-ink/60">
+            Local sync code (same network):
+          </span>{" "}
+          <span className="font-mono text-lg font-bold tracking-widest text-ehv-red">
+            {syncCode}
+          </span>
+        </p>
+      )}
+
+      <div className="mt-4 flex justify-center">
+        <QRDisplay value={code} caption="Courier → scan / import" />
+      </div>
+    </section>
   );
 }
 

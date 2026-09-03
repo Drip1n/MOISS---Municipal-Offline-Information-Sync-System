@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 
 /**
- * Renders a transfer code as a QR image plus a copy-paste fallback, so the
- * demo never depends on a working camera at the receiving end.
+ * Renders a transfer code as a large, crisp QR plus a copy-paste fallback, so a
+ * laptop webcam can read a phone screen from normal demo distance and the demo
+ * never depends on a working camera.
  */
 export function QRDisplay({
   value,
@@ -18,11 +19,14 @@ export function QRDisplay({
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    // Lower error-correction as payload grows keeps the module grid coarse
+    // enough for a webcam; short codes get sturdier correction.
+    const ecc = value.length > 600 ? "L" : value.length > 350 ? "M" : "Q";
     QRCode.toDataURL(value, {
-      errorCorrectionLevel: "M",
-      margin: 2,
-      width: 320,
-      color: { dark: "#1A1A1A", light: "#FFFFFF" },
+      errorCorrectionLevel: ecc,
+      margin: 4, // quiet zone
+      width: 1024, // render high-res; CSS caps the display size, never upscales
+      color: { dark: "#111111", light: "#FFFFFF" },
     })
       .then(setDataUrl)
       .catch(() => setDataUrl(""));
@@ -30,18 +34,16 @@ export function QRDisplay({
 
   return (
     <div className="flex w-full flex-col items-center gap-4">
-      <div className="rounded-lg border border-ehv-grey-line bg-white p-3">
+      <div className="rounded-lg border border-ehv-grey-line bg-white p-4">
         {dataUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={dataUrl}
             alt="Transfer QR code"
-            width={320}
-            height={320}
-            className="h-auto w-[min(320px,72vw)]"
+            className="block h-auto w-[min(460px,82vw)]"
           />
         ) : (
-          <div className="flex h-[min(320px,72vw)] w-[min(320px,72vw)] items-center justify-center text-sm text-ehv-ink/40">
+          <div className="flex h-[min(460px,82vw)] w-[min(460px,82vw)] items-center justify-center text-sm text-ehv-ink/40">
             Generating…
           </div>
         )}

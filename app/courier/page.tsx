@@ -14,57 +14,108 @@ import {
   getCourierUpdates,
   markCourierUpdateDelivered,
 } from "@/lib/storage";
-import { buildPayload, decodePayload, encodePayload } from "@/lib/transfer";
-import { CATEGORY_LABEL, PRIORITY_LABEL, formatTime } from "@/lib/util";
+import { buildTransfer, readTransfer } from "@/lib/transfer";
+import { pullLocal } from "@/lib/localsync";
+import { categoryLabel, PRIORITY_LABEL, formatTime } from "@/lib/util";
 
 export default function CourierPage() {
   const [stored] = useStore<StoredUpdate[]>(getCourierUpdates, []);
   const [mode, setMode] = useState<"list" | "receive">("list");
   const [showQrFor, setShowQrFor] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string>("");
+  const [notice, setNotice] = useState("");
+  const [rejected, setRejected] = useState(false);
+  const [justReceived, setJustReceived] = useState<CrisisUpdate | null>(null);
+  const [syncInput, setSyncInput] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
 
   const pending = stored.filter((s) => s.deliveryStatus === "pending");
   const delivered = stored.filter((s) => s.deliveryStatus === "delivered");
 
   function receive(raw: string) {
-    const res = decodePayload(raw);
-    if (!res.ok || !res.payload || res.payload.kind !== "crisis_update") {
+    setRejected(false);
+    const res = readTransfer(raw);
+    if (!res.ok || res.kind !== "crisis_update" || !res.data) {
       setNotice(res.error || "Not a municipal update.");
       return;
     }
+    // Defence-in-depth: a courier never stores or carries an unverified update.
+    if (!res.verified) {
+      setRejected(true);
+      setNotice("");
+      setMode("list");
+      return;
+    }
+    const data = res.data as CrisisUpdate;
     addCourierUpdate({
-      payload: res.payload,
+      data,
       receivedAt: new Date().toISOString(),
       deliveryStatus: "pending",
-      verified: !!res.verified,
+      verified: true,
     });
-    setNotice("Update stored. Carry it to the NCP.");
+    setJustReceived(data);
+    setNotice("");
     setMode("list");
   }
 
-  const qrTarget = stored.find(
-    (s) => (s.payload.data as CrisisUpdate).id === showQrFor
-  );
+  async function tryLocalSync() {
+    const code = syncInput.trim().toUpperCase();
+    if (code.length < 4) return;
+    setSyncBusy(true);
+    const transfer = await pullLocal(code);
+    setSyncBusy(false);
+    if (!transfer) {
+      setNotice("No transfer for that code. Use the QR instead.");
+      return;
+    }
+    setSyncInput("");
+    receive(transfer);
+  }
+
+  const qrTarget = stored.find((s) => s.data.id === showQrFor);
   const qrCode = useMemo(
-    () =>
-      qrTarget
-        ? encodePayload(
-            buildPayload("crisis_update", qrTarget.payload.data as CrisisUpdate)
-          )
-        : "",
+    () => (qrTarget ? buildTransfer("crisis_update", qrTarget.data) : ""),
     [qrTarget]
   );
 
   return (
     <div className="flex min-h-screen flex-col bg-ehv-grey">
-      <RoleHeader role="Courier" sub="Offline ready" />
+      <RoleHeader role="Courier" />
 
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-6">
-        {notice ? (
+        {notice && (
           <p className="mb-4 rounded bg-ehv-ink px-3 py-2 text-sm font-medium text-white">
             {notice}
           </p>
-        ) : null}
+        )}
+
+        {rejected && (
+          <div className="mb-4 rounded-lg border-2 border-ehv-red bg-white p-4">
+            <p className="text-sm font-extrabold uppercase tracking-wide text-ehv-red">
+              Invalid municipal signature
+            </p>
+            <p className="mt-1 text-sm text-ehv-ink/70">
+              Transfer rejected — not stored, not carried.
+            </p>
+          </div>
+        )}
+
+        {justReceived && (
+          <div className="mb-4 rounded-lg border-2 border-ehv-green bg-white p-4">
+            <p className="text-xs font-bold uppercase tracking-widest text-ehv-ink/45">
+              Update received
+            </p>
+            <p className="mt-1 font-mono text-2xl font-bold text-ehv-ink">
+              {justReceived.id}
+            </p>
+            <div className="mt-2">
+              <VerificationBadge verified />
+            </div>
+            <p className="mt-2 text-sm text-ehv-ink/70">
+              {categoryLabel(justReceived.category)} · {justReceived.area} —
+              ready for delivery.
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-2 text-center">
           <Mini label="Stored" value={stored.length} />
@@ -73,15 +124,38 @@ export default function CourierPage() {
         </div>
 
         {mode === "list" ? (
-          <button
-            onClick={() => {
-              setNotice("");
-              setMode("receive");
-            }}
-            className="mt-5 w-full rounded-lg bg-ehv-red px-4 py-4 text-lg font-bold text-white"
-          >
-            Receive update
-          </button>
+          <>
+            <button
+              onClick={() => {
+                setNotice("");
+                setRejected(false);
+                setJustReceived(null);
+                setMode("receive");
+              }}
+              className="mt-5 w-full rounded-lg bg-ehv-red px-4 py-4 text-lg font-bold text-white"
+            >
+              Receive update
+            </button>
+            <div className="mt-3 flex gap-2">
+              <input
+                value={syncInput}
+                onChange={(e) => setSyncInput(e.target.value.toUpperCase())}
+                placeholder="Local sync code"
+                maxLength={8}
+                className="flex-1 rounded border border-ehv-grey-line bg-white px-3 py-2 font-mono text-sm uppercase tracking-widest"
+              />
+              <button
+                onClick={tryLocalSync}
+                disabled={syncBusy || syncInput.trim().length < 4}
+                className="rounded border border-ehv-red px-4 py-2 text-sm font-semibold text-ehv-red disabled:opacity-40"
+              >
+                {syncBusy ? "…" : "Get"}
+              </button>
+            </div>
+            <p className="mt-1 text-center text-[11px] text-ehv-ink/45">
+              On the same network as Command? Enter the code shown there.
+            </p>
+          </>
         ) : (
           <div className="mt-5">
             <div className="mb-2 flex items-center justify-between">
@@ -97,10 +171,14 @@ export default function CourierPage() {
           </div>
         )}
 
-        {showQrFor && qrTarget ? (
+        {showQrFor && qrTarget && (
           <section className="mt-6 rounded-lg border-2 border-ehv-red bg-white p-4">
             <div className="flex items-center justify-between">
-              <h2 className="font-bold">Transfer to NCP</h2>
+              <h2 className="font-bold">
+                Transfer{" "}
+                <span className="font-mono text-ehv-red">{qrTarget.data.id}</span>{" "}
+                to NCP
+              </h2>
               <button
                 onClick={() => setShowQrFor(null)}
                 className="text-sm font-semibold text-ehv-ink/50"
@@ -113,9 +191,7 @@ export default function CourierPage() {
             </div>
             <button
               onClick={() => {
-                markCourierUpdateDelivered(
-                  (qrTarget.payload.data as CrisisUpdate).id
-                );
+                markCourierUpdateDelivered(qrTarget.data.id);
                 setShowQrFor(null);
                 setNotice("Marked as delivered.");
               }}
@@ -124,17 +200,17 @@ export default function CourierPage() {
               Mark as delivered
             </button>
           </section>
-        ) : null}
+        )}
 
         <div className="mt-6 space-y-4">
-          {stored.length === 0 ? (
+          {stored.length === 0 && (
             <p className="text-center text-sm text-ehv-ink/50">
               No updates carried yet.
             </p>
-          ) : null}
+          )}
 
           {stored.map((s) => {
-            const u = s.payload.data as CrisisUpdate;
+            const u = s.data;
             return (
               <article
                 key={u.id}
@@ -151,9 +227,9 @@ export default function CourierPage() {
                     {PRIORITY_LABEL[u.priority]}
                   </span>
                   <span className="text-xs font-bold uppercase text-ehv-ink/60">
-                    {CATEGORY_LABEL[u.category]}
+                    {categoryLabel(u.category)}
                   </span>
-                  <span className="ml-auto text-xs font-mono text-ehv-ink/45">
+                  <span className="ml-auto font-mono text-xs font-bold text-ehv-ink">
                     {u.id}
                   </span>
                 </div>
@@ -165,10 +241,7 @@ export default function CourierPage() {
                 </p>
 
                 <div className="mt-3 flex items-center justify-between gap-2">
-                  <VerificationBadge
-                    verified={s.verified}
-                    mode={s.payload.mode}
-                  />
+                  <VerificationBadge verified={s.verified} />
                   <span
                     className={`text-xs font-bold uppercase ${
                       s.deliveryStatus === "delivered"
@@ -182,14 +255,14 @@ export default function CourierPage() {
                   </span>
                 </div>
 
-                {s.deliveryStatus === "pending" ? (
+                {s.deliveryStatus === "pending" && (
                   <button
                     onClick={() => setShowQrFor(u.id)}
                     className="mt-3 w-full rounded bg-ehv-red px-4 py-2.5 font-semibold text-white"
                   >
                     Show transfer QR
                   </button>
-                ) : null}
+                )}
               </article>
             );
           })}

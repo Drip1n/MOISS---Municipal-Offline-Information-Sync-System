@@ -1,5 +1,5 @@
 import type { CrisisUpdate } from "@/types";
-import { CATEGORY_LABEL, PRIORITY_LABEL, formatTime } from "@/lib/util";
+import { categoryLabel, PRIORITY_LABEL, formatTime } from "@/lib/util";
 
 const PRIORITY_STYLE: Record<CrisisUpdate["priority"], string> = {
   normal: "bg-ehv-grey text-ehv-ink/70 border-ehv-grey-line",
@@ -10,16 +10,14 @@ const PRIORITY_STYLE: Record<CrisisUpdate["priority"], string> = {
 export function UpdateCard({
   update,
   receivedAt,
-  status,
   compact = false,
 }: {
   update: CrisisUpdate;
   receivedAt?: string;
-  status?: string;
   compact?: boolean;
 }) {
   return (
-    <article className="rounded-lg border border-ehv-grey-line bg-white p-5 shadow-sm">
+    <article className="rounded-lg border border-ehv-grey-line bg-white p-5">
       <div className="flex flex-wrap items-center gap-2">
         <span
           className={`rounded border px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${PRIORITY_STYLE[update.priority]}`}
@@ -27,9 +25,9 @@ export function UpdateCard({
           {PRIORITY_LABEL[update.priority]}
         </span>
         <span className="rounded border border-ehv-grey-line bg-ehv-grey px-2.5 py-1 text-xs font-bold uppercase tracking-wide text-ehv-ink/70">
-          {CATEGORY_LABEL[update.category]}
+          {categoryLabel(update.category)}
         </span>
-        <span className="ml-auto text-xs font-mono text-ehv-ink/50">
+        <span className="ml-auto font-mono text-sm font-bold text-ehv-ink">
           {update.id}
         </span>
       </div>
@@ -61,12 +59,6 @@ export function UpdateCard({
           </div>
         ) : null}
       </dl>
-
-      {status ? (
-        <p className="mt-4 inline-flex rounded bg-ehv-ink px-2.5 py-1 text-xs font-semibold uppercase tracking-widest text-white">
-          {status}
-        </p>
-      ) : null}
     </article>
   );
 }
