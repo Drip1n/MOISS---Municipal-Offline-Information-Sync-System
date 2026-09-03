@@ -254,7 +254,7 @@ export default function CommandPage() {
         )}
 
         {/* LOCAL TRANSFER NETWORK */}
-        <BootstrapPanel networkName="MOISS-EHV-COMMAND" />
+        <BootstrapPanel networkName="MOISS-LOCAL" />
 
         {/* INCOMING FIELD REPORTS — secondary */}
         <details className="mt-8 rounded-lg border border-ehv-grey-line bg-white">

@@ -236,7 +236,7 @@ export default function NcpPage() {
         </section>
 
         {/* LOCAL TRANSFER NETWORK */}
-        <BootstrapPanel networkName="MOISS-EHV-NCP" />
+        <BootstrapPanel networkName="MOISS-LOCAL" />
 
         {/* FIELD REPORT — secondary */}
         <details className="mt-8 rounded-lg border border-ehv-grey-line bg-white">
