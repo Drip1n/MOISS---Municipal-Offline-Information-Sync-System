@@ -13,7 +13,8 @@ locations — Command → Courier → NCP → citizens.
 ## Quick start
 
 ```bash
-git clone <repo> && cd HackatonFontysFall2026
+git clone https://github.com/Drip1n/MOISS---Municipal-Offline-Information-Sync-System.git
+cd MOISS---Municipal-Offline-Information-Sync-System
 npm install
 npm run build
 npm start          # http://localhost:3100
